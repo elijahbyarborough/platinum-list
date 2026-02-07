@@ -4,7 +4,9 @@ import { getPrice } from '../../lib/services/stockPriceService.js';
 
 /**
  * Cron job endpoint for automated daily price refresh
- * Configured in vercel.json to run at 9 AM ET (14:00 UTC) on weekdays
+ * Configured in vercel.json to run at:
+ * - 7:30 AM ET (12:30 UTC) on weekdays (before PDF generation)
+ * - 4:00 PM ET (20:00 UTC) on weekdays (end of day)
  * 
  * This endpoint can also be called manually if needed.
  */
