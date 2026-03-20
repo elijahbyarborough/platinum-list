@@ -21,12 +21,15 @@ export interface SearchResult {
 export async function searchTickers(query: string): Promise<SearchResult[]> {
   try {
     const results = await yahooFinance.search(query);
-    return results.quotes.slice(0, 10).map((quote: any) => ({
-      symbol: quote.symbol,
-      name: quote.longname || quote.shortname || quote.symbol,
-      exchange: quote.exchange,
-      type: quote.quoteType,
-    }));
+    return results.quotes
+      .filter((quote: any) => quote.symbol)
+      .slice(0, 10)
+      .map((quote: any) => ({
+        symbol: quote.symbol,
+        name: quote.longname || quote.shortname || quote.symbol,
+        exchange: quote.exchange,
+        type: quote.quoteType,
+      }));
   } catch (error) {
     console.error(`Error searching for ${query}:`, error);
     return [];

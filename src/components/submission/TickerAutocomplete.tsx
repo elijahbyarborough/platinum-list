@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
@@ -24,67 +24,102 @@ export function TickerAutocomplete({
   disabled,
   required,
 }: TickerAutocompleteProps) {
+  // Use internal state for the input text so we don't depend on parent re-renders
+  const [inputValue, setInputValue] = useState(value);
   const [suggestions, setSuggestions] = useState<SearchResult[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [loading, setLoading] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
+  // Sync internal state if parent value changes (e.g., form reset)
+  useEffect(() => {
+    setInputValue(value);
+  }, [value]);
+
+  // Click outside to close
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
         setShowSuggestions(false);
       }
     };
-
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Fetch suggestions when inputValue changes
   useEffect(() => {
-    // Don't fetch suggestions if disabled or value is too short
-    if (disabled || value.length < 1) {
+    if (disabled || inputValue.length < 1) {
       setSuggestions([]);
       setShowSuggestions(false);
       return;
     }
 
+    const controller = new AbortController();
+    abortRef.current?.abort();
+    abortRef.current = controller;
+
     const timer = setTimeout(async () => {
       setLoading(true);
       try {
-        const response = await fetch(`/api/search?q=${encodeURIComponent(value)}`);
+        const response = await fetch(
+          `/api/search?q=${encodeURIComponent(inputValue)}`,
+          { signal: controller.signal }
+        );
         if (response.ok) {
-          const results = await response.json();
-          setSuggestions(results);
-          setShowSuggestions(results.length > 0);
+          const results: SearchResult[] = await response.json();
+          // Filter out empty results from Yahoo
+          const valid = results.filter((r) => r && r.symbol);
+          setSuggestions(valid);
+          setShowSuggestions(valid.length > 0);
           setSelectedIndex(-1);
         }
-      } catch (error) {
-        console.error('Error fetching suggestions:', error);
+      } catch (error: any) {
+        if (error?.name !== 'AbortError') {
+          console.error('Error fetching suggestions:', error);
+        }
       } finally {
         setLoading(false);
       }
     }, 300);
 
-    return () => clearTimeout(timer);
-  }, [value, disabled]);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [inputValue, disabled]);
 
-  const handleSelect = (result: SearchResult) => {
-    onChange(result.symbol);
-    onSelect(result.symbol, result.name);
-    setShowSuggestions(false);
-    setSuggestions([]);
-  };
+  const handleInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const upper = e.target.value.toUpperCase();
+      setInputValue(upper);
+      onChange(upper);
+    },
+    [onChange]
+  );
+
+  const handleSelect = useCallback(
+    (result: SearchResult) => {
+      setInputValue(result.symbol);
+      onChange(result.symbol);
+      onSelect(result.symbol, result.name);
+      setShowSuggestions(false);
+      setSuggestions([]);
+    },
+    [onChange, onSelect]
+  );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!showSuggestions || suggestions.length === 0) return;
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelectedIndex(prev => (prev < suggestions.length - 1 ? prev + 1 : prev));
+      setSelectedIndex((prev) => (prev < suggestions.length - 1 ? prev + 1 : prev));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setSelectedIndex(prev => (prev > 0 ? prev - 1 : -1));
+      setSelectedIndex((prev) => (prev > 0 ? prev - 1 : -1));
     } else if (e.key === 'Enter' && selectedIndex >= 0) {
       e.preventDefault();
       handleSelect(suggestions[selectedIndex]);
@@ -98,8 +133,8 @@ export function TickerAutocomplete({
       <div className="relative">
         <Input
           id="ticker"
-          value={value}
-          onChange={(e) => onChange(e.target.value.toUpperCase())}
+          value={inputValue}
+          onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           placeholder="e.g., AAPL"
           required={required}
@@ -113,7 +148,7 @@ export function TickerAutocomplete({
           </div>
         )}
       </div>
-      
+
       {!disabled && showSuggestions && suggestions.length > 0 && (
         <div className="absolute z-50 w-full mt-2 bg-popover border border-border rounded-lg shadow-xl overflow-hidden animate-in fade-in-0 zoom-in-95 duration-200">
           <div className="max-h-64 overflow-auto">
@@ -122,12 +157,12 @@ export function TickerAutocomplete({
                 key={result.symbol}
                 type="button"
                 className={cn(
-                  "w-full px-4 py-3 text-left transition-colors duration-150",
-                  "border-b border-border/30 last:border-b-0",
-                  "focus:outline-none",
-                  index === selectedIndex 
-                    ? "bg-primary/10" 
-                    : "hover:bg-secondary/50"
+                  'w-full px-4 py-3 text-left transition-colors duration-150',
+                  'border-b border-border/30 last:border-b-0',
+                  'focus:outline-none',
+                  index === selectedIndex
+                    ? 'bg-primary/10'
+                    : 'hover:bg-secondary/50'
                 )}
                 onClick={() => handleSelect(result)}
                 onMouseEnter={() => setSelectedIndex(index)}
@@ -150,7 +185,7 @@ export function TickerAutocomplete({
               </button>
             ))}
           </div>
-          
+
           {/* Keyboard hint */}
           <div className="px-4 py-2 bg-secondary/30 border-t border-border/30 flex items-center justify-between text-xs text-muted-foreground">
             <span className="flex items-center gap-2">
