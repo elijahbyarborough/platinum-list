@@ -1,4 +1,4 @@
-import { getMetricForYear, getDividendForYear, calculateYearFraction, getCurrentFiscalYear, getFiscalYearForDate, calculateYearFractionForDate } from './fiscalYear.js';
+import { getMetricForYear, getDividendForYear, getMaValueForYear, calculateYearFraction, getCurrentFiscalYear, getFiscalYearForDate, calculateYearFractionForDate } from './fiscalYear.js';
 import { Company, Estimate } from '../db.js';
 
 /**
@@ -88,21 +88,33 @@ export function calculate5YearIRR(
   // Get metrics for the fiscal years we need to interpolate between
   const forwardMetric = getMetricForYear(estimates, forwardFY);
   const nextMetric = getMetricForYear(estimates, nextFY);
-  
+
   if (forwardMetric === null || nextMetric === null) {
     return null; // Insufficient data
   }
-  
+
   // Calculate year fraction for the 5-year forward date within its fiscal year
   const yearFraction = calculateYearFractionForDate(fiveYearsFromNow, company.fiscal_year_end_date);
-  
+
   // Interpolate: (yearFraction × forwardFY) + ((1 - yearFraction) × nextFY)
   // yearFraction = 1.0 at start of FY, 0.0 at end of FY
   // So if we're early in the FY, use more of forwardFY; if late, use more of nextFY
   const interpolatedMetric = (yearFraction * forwardMetric) + ((1 - yearFraction) * nextMetric);
-  
-  // Calculate future price
-  const futurePrice = interpolatedMetric * exitMultiple;
+
+  // Interpolate M&A value at 5-year mark (same interpolation logic as metric)
+  const forwardMaValue = getMaValueForYear(estimates, forwardFY);
+  const nextMaValue = getMaValueForYear(estimates, nextFY);
+  let interpolatedMaValue = 0;
+  if (forwardMaValue !== null && nextMaValue !== null) {
+    interpolatedMaValue = (yearFraction * forwardMaValue) + ((1 - yearFraction) * nextMaValue);
+  } else if (forwardMaValue !== null) {
+    interpolatedMaValue = forwardMaValue;
+  } else if (nextMaValue !== null) {
+    interpolatedMaValue = nextMaValue;
+  }
+
+  // Calculate future price: (EPS * Multiple) + M&A Value
+  const futurePrice = (interpolatedMetric * exitMultiple) + interpolatedMaValue;
   
   // Calculate price CAGR: (futurePrice / currentPrice)^(1/5) - 1
   const priceCAGR = Math.pow(futurePrice / company.current_stock_price, 1 / 5) - 1;

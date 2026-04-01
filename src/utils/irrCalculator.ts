@@ -8,6 +8,7 @@ interface EstimateData {
   fiscal_year: number;
   metric_value: number | null;
   dividend_value: number | null;
+  ma_value?: number | null;
 }
 
 interface IRRInput {
@@ -24,6 +25,8 @@ interface IRRResult {
   averageDividend: number | null;
   futurePrice: number | null;
   interpolatedMetric: number | null;
+  interpolatedMaValue: number | null;
+  totalPrice: number | null;
   missingData: string[];
 }
 
@@ -93,6 +96,14 @@ function getMetricForYear(estimates: EstimateData[], fiscalYear: number): number
 function getDividendForYear(estimates: EstimateData[], fiscalYear: number): number | null {
   const estimate = estimates.find(e => e.fiscal_year === fiscalYear);
   return estimate?.dividend_value ?? null;
+}
+
+/**
+ * Get M&A value per share for a specific fiscal year from estimates array
+ */
+function getMaValueForYear(estimates: EstimateData[], fiscalYear: number): number | null {
+  const estimate = estimates.find(e => e.fiscal_year === fiscalYear);
+  return estimate?.ma_value ?? null;
 }
 
 /**
@@ -178,6 +189,8 @@ export function calculate5YearIRRPreview(input: IRRInput): IRRResult {
       averageDividend: null,
       futurePrice: null,
       interpolatedMetric: null,
+      interpolatedMaValue: null,
+      totalPrice: null,
       missingData,
     };
   }
@@ -213,6 +226,8 @@ export function calculate5YearIRRPreview(input: IRRInput): IRRResult {
       averageDividend: null,
       futurePrice: null,
       interpolatedMetric: null,
+      interpolatedMaValue: null,
+      totalPrice: null,
       missingData,
     };
   }
@@ -225,12 +240,27 @@ export function calculate5YearIRRPreview(input: IRRInput): IRRResult {
   
   // Interpolate: (yearFraction × forwardFY) + ((1 - yearFraction) × nextFY)
   const interpolatedMetric = (yearFraction * forwardMetric!) + ((1 - yearFraction) * nextMetric!);
-  
-  // Calculate future price
+
+  // Interpolate M&A value at 5-year mark (same interpolation logic as metric)
+  const forwardMaValue = getMaValueForYear(input.estimates, forwardFY);
+  const nextMaValue = getMaValueForYear(input.estimates, nextFY);
+  let interpolatedMaValue = 0;
+  if (forwardMaValue !== null && nextMaValue !== null) {
+    interpolatedMaValue = (yearFraction * forwardMaValue) + ((1 - yearFraction) * nextMaValue);
+  } else if (forwardMaValue !== null) {
+    interpolatedMaValue = forwardMaValue;
+  } else if (nextMaValue !== null) {
+    interpolatedMaValue = nextMaValue;
+  }
+
+  // Calculate future price: EPS * Multiple (the EPS-implied price)
   const futurePrice = interpolatedMetric * exitMultiple;
-  
-  // Calculate price CAGR: (futurePrice / currentPrice)^(1/5) - 1
-  const priceCAGR = Math.pow(futurePrice / currentPrice, 1 / 5) - 1;
+
+  // Total price includes M&A value added on top
+  const totalPrice = futurePrice + interpolatedMaValue;
+
+  // Calculate price CAGR based on total price (what you actually receive at exit)
+  const priceCAGR = Math.pow(totalPrice / currentPrice, 1 / 5) - 1;
   
   // Calculate IRR using cash flows with proper timing
   // Build cash flow array: [-currentPrice at t=0, dividends at their times, +futurePrice at t=5]
@@ -353,9 +383,9 @@ export function calculate5YearIRRPreview(input: IRRInput): IRRResult {
     }
   }
   
-  // Add final price at exactly 5 years
+  // Add final price at exactly 5 years (total price includes M&A value)
   const fiveYearsTime = 5.0;
-  cashFlows.push(futurePrice);
+  cashFlows.push(totalPrice);
   times.push(fiveYearsTime);
   
   // Calculate IRR using Newton-Raphson
@@ -382,6 +412,8 @@ export function calculate5YearIRRPreview(input: IRRInput): IRRResult {
     averageDividend,
     futurePrice,
     interpolatedMetric,
+    interpolatedMaValue: interpolatedMaValue > 0 ? interpolatedMaValue : null,
+    totalPrice,
     missingData: [],
   };
 }

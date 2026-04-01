@@ -22,6 +22,7 @@ export interface Estimate {
   fiscal_year: number; // Absolute year (e.g., 2026, 2027)
   metric_value: number | null;
   dividend_value: number | null;
+  ma_value: number | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -39,6 +40,7 @@ export interface EstimateFormData {
   fiscal_year: number;
   metric_value: number | null;
   dividend_value: number | null;
+  ma_value: number | null;
 }
 
 export interface CompanyFormData {

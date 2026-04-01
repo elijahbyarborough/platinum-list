@@ -8,6 +8,7 @@ interface EstimateData {
   fiscal_year: number;
   metric_value: number | null;
   dividend_value: number | null;
+  ma_value?: number | null;
 }
 
 interface IRRPreviewProps {
@@ -89,7 +90,10 @@ export function IRRPreview({
           </div>
 
           {/* Breakdown Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+          <div className={cn(
+            "grid grid-cols-2 gap-4",
+            result.interpolatedMaValue ? "md:grid-cols-4" : "md:grid-cols-6"
+          )}>
             <div className="p-4 rounded-lg bg-secondary/30 border border-border/30">
               <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">
                 5Y FWD {metricType}
@@ -108,12 +112,32 @@ export function IRRPreview({
             </div>
             <div className="p-4 rounded-lg bg-secondary/30 border border-border/30">
               <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">
-                Future Price
+                {result.interpolatedMaValue ? 'EPS-Implied Price' : 'Future Price'}
               </div>
               <div className="text-lg font-semibold font-mono">
                 {formatPrice(result.futurePrice)}
               </div>
             </div>
+            {result.interpolatedMaValue && (
+              <>
+                <div className="p-4 rounded-lg bg-secondary/30 border border-border/30">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">
+                    M&A Value
+                  </div>
+                  <div className="text-lg font-semibold font-mono">
+                    {formatPrice(result.interpolatedMaValue)}
+                  </div>
+                </div>
+                <div className="p-4 rounded-lg bg-primary/10 border border-primary/30">
+                  <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">
+                    Total Price
+                  </div>
+                  <div className="text-lg font-semibold font-mono">
+                    {formatPrice(result.totalPrice)}
+                  </div>
+                </div>
+              </>
+            )}
             <div className="p-4 rounded-lg bg-secondary/30 border border-border/30">
               <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">
                 Price CAGR
@@ -179,7 +203,8 @@ export function IRRPreview({
                     <div className="text-foreground mb-1">Cash Flows:</div>
                     <div>• Initial investment: -Current Price (at time 0)</div>
                     <div>• Dividends: Paid at midpoint of each fiscal year period</div>
-                    <div>• Final value: +Future Price (at exactly 5 years)</div>
+                    <div>• Final value: +Total Price (at exactly 5 years)</div>
+                    <div>  where Total Price = (EPS × Multiple) + M&A Value</div>
                   </div>
                 </div>
 
@@ -193,7 +218,7 @@ export function IRRPreview({
                     <div className="text-foreground mb-1">Formula:</div>
                     <div>Price CAGR = (Future Price / Current Price)<sup>(1/5)</sup> - 1</div>
                     <div className="mt-2 text-muted-foreground">
-                      Where Future Price = 5-Year Forward {metricType} × Exit Multiple
+                      Where Future Price = (5-Year Forward {metricType} × Exit Multiple) + M&A Value
                     </div>
                   </div>
                 </div>

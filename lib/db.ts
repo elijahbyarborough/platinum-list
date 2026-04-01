@@ -29,6 +29,7 @@ export interface Estimate {
   metric_type: MetricType;
   metric_value: number | null;
   dividend_value: number | null;
+  ma_value: number | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -73,6 +74,7 @@ export function parseEstimateRow(row: any): Estimate {
     metric_type: row.metric_type,
     metric_value: row.metric_value ? Number(row.metric_value) : null,
     dividend_value: row.dividend_value ? Number(row.dividend_value) : null,
+    ma_value: row.ma_value ? Number(row.ma_value) : null,
   };
 }
 

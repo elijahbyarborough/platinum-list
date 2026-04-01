@@ -76,6 +76,14 @@ export function getDividendForYear(estimates: Estimate[], fiscalYear: number): n
 }
 
 /**
+ * Get M&A value per share for a specific fiscal year from estimates array
+ */
+export function getMaValueForYear(estimates: Estimate[], fiscalYear: number): number | null {
+  const estimate = estimates.find(e => e.fiscal_year === fiscalYear);
+  return estimate?.ma_value ?? null;
+}
+
+/**
  * Get the fiscal year for a specific date
  * @param date - The date to check
  * @param fiscalYearEndDate - Date string (YYYY-MM-DD) when fiscal year ends

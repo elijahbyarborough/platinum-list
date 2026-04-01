@@ -8,6 +8,7 @@ interface EstimateData {
   fiscal_year: number;
   metric_value: number | null;
   dividend_value: number | null;
+  ma_value: number | null;
 }
 
 interface EstimatesTableProps {
@@ -23,7 +24,7 @@ export function EstimatesTable({
   onEstimatesChange,
   metricType = 'GAAP EPS',
 }: EstimatesTableProps) {
-  const [isPasteActive, setIsPasteActive] = useState<'metrics' | 'dividends' | null>(null);
+  const [isPasteActive, setIsPasteActive] = useState<'metrics' | 'dividends' | 'ma_value' | null>(null);
 
   // Generate fiscal years based on fiscal year end date
   const fiscalYears = useMemo(() => {
@@ -38,6 +39,7 @@ export function EstimatesTable({
         fiscal_year: year,
         metric_value: null,
         dividend_value: null,
+        ma_value: null,
       }));
       onEstimatesChange(initialEstimates);
     }
@@ -49,6 +51,7 @@ export function EstimatesTable({
       fiscal_year: fiscalYear,
       metric_value: null,
       dividend_value: null,
+      ma_value: null,
     };
   };
 
@@ -82,7 +85,22 @@ export function EstimatesTable({
     onEstimatesChange(newEstimates);
   };
 
-  const handlePaste = (e: React.ClipboardEvent, rowType: 'metrics' | 'dividends', startYear?: number) => {
+  // Update M&A value for a specific fiscal year
+  const handleMaValueChange = (fiscalYear: number, value: string) => {
+    const numValue = value === '' ? null : parseFloat(value);
+    if (numValue !== null && isNaN(numValue)) return;
+
+    const newEstimates = fiscalYears.map(year => {
+      const existing = getEstimate(year);
+      if (year === fiscalYear) {
+        return { ...existing, ma_value: numValue };
+      }
+      return existing;
+    });
+    onEstimatesChange(newEstimates);
+  };
+
+  const handlePaste = (e: React.ClipboardEvent, rowType: 'metrics' | 'dividends' | 'ma_value', startYear?: number) => {
     e.preventDefault();
     e.stopPropagation();
     
@@ -123,6 +141,7 @@ export function EstimatesTable({
       fiscal_year: year,
       metric_value: null,
       dividend_value: null,
+      ma_value: null,
     }));
 
     const newEstimates = [...currentEstimates];
@@ -148,10 +167,15 @@ export function EstimatesTable({
               ...newEstimates[estimateIndex],
               metric_value: validValue,
             };
-          } else {
+          } else if (rowType === 'dividends') {
             newEstimates[estimateIndex] = {
               ...newEstimates[estimateIndex],
               dividend_value: validValue,
+            };
+          } else if (rowType === 'ma_value') {
+            newEstimates[estimateIndex] = {
+              ...newEstimates[estimateIndex],
+              ma_value: validValue,
             };
           }
         }
@@ -249,7 +273,7 @@ export function EstimatesTable({
             </tr>
 
             {/* Dividends Row */}
-            <tr 
+            <tr
               onPaste={(e) => handlePaste(e, 'dividends')}
               onPasteCapture={(e) => handlePaste(e, 'dividends')}
               className={cn(
@@ -257,7 +281,7 @@ export function EstimatesTable({
                 isPasteActive === 'dividends' && "bg-primary/10"
               )}
             >
-              <td className="px-4 py-3 bg-[hsl(var(--table-row-even))]">
+              <td className="px-4 py-3 bg-[hsl(var(--table-row-even))] border-b border-border/30">
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-sm text-foreground">Dividends</span>
                   <span className="text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded">
@@ -268,7 +292,7 @@ export function EstimatesTable({
               {fiscalYears.map((year) => {
                 const estimate = getEstimate(year);
                 return (
-                  <td key={year} className="px-1 py-2 bg-[hsl(var(--table-row-even))]">
+                  <td key={year} className="px-1 py-2 bg-[hsl(var(--table-row-even))] border-b border-border/30">
                     <Input
                       type="number"
                       step="0.01"
@@ -283,6 +307,50 @@ export function EstimatesTable({
                         e.preventDefault();
                         e.stopPropagation();
                         handlePaste(e, 'dividends', year);
+                      }}
+                      className="h-9 text-center text-sm px-2 bg-background/50"
+                      placeholder="—"
+                    />
+                  </td>
+                );
+              })}
+            </tr>
+
+            {/* M&A Value Row */}
+            <tr
+              onPaste={(e) => handlePaste(e, 'ma_value')}
+              onPasteCapture={(e) => handlePaste(e, 'ma_value')}
+              className={cn(
+                "transition-all duration-300",
+                isPasteActive === 'ma_value' && "bg-primary/10"
+              )}
+            >
+              <td className="px-4 py-3 bg-[hsl(var(--table-row-odd))]">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-sm text-foreground">M&A Value</span>
+                  <span className="text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded">
+                    Per Share
+                  </span>
+                </div>
+              </td>
+              {fiscalYears.map((year) => {
+                const estimate = getEstimate(year);
+                return (
+                  <td key={year} className="px-1 py-2 bg-[hsl(var(--table-row-odd))]">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={estimate.ma_value === null ? '' : estimate.ma_value}
+                      onChange={(e) => handleMaValueChange(year, e.target.value)}
+                      onPaste={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handlePaste(e, 'ma_value', year);
+                      }}
+                      onPasteCapture={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handlePaste(e, 'ma_value', year);
                       }}
                       className="h-9 text-center text-sm px-2 bg-background/50"
                       placeholder="—"

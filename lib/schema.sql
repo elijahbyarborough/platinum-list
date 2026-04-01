@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS estimates (
   metric_type VARCHAR(30) NOT NULL CHECK(metric_type IN ('GAAP EPS', 'Norm. EPS', 'Mgmt. EPS', 'FCFPS', 'DEPS', 'NAVPS', 'BVPS', 'DPS', 'Other')),
   metric_value DECIMAL(12,4),
   dividend_value DECIMAL(12,4),
+  ma_value DECIMAL(12,4),
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(company_id, fiscal_year, metric_type)

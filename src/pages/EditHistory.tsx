@@ -23,8 +23,8 @@ function EstimatesGrid({
   showChanges = false,
   metricType
 }: { 
-  estimates: { fiscal_year: number; metric_value: number | null; dividend_value: number | null }[];
-  compareEstimates?: { fiscal_year: number; metric_value: number | null; dividend_value: number | null }[];
+  estimates: { fiscal_year: number; metric_value: number | null; dividend_value: number | null; ma_value?: number | null }[];
+  compareEstimates?: { fiscal_year: number; metric_value: number | null; dividend_value: number | null; ma_value?: number | null }[];
   showChanges?: boolean;
   metricType?: string;
 }) {
@@ -49,7 +49,8 @@ function EstimatesGrid({
             <tr className="text-muted-foreground">
               <th className="text-left pr-2 font-normal">FY</th>
               <th className="text-right pr-2 font-normal">{metricType || 'Metric'}</th>
-              <th className="text-right font-normal">Div</th>
+              <th className="text-right pr-2 font-normal">Div</th>
+              <th className="text-right font-normal">M&A</th>
             </tr>
           </thead>
           <tbody>
@@ -57,7 +58,8 @@ function EstimatesGrid({
               const compareEst = compareMap.get(est.fiscal_year);
               const metricChanged = showChanges && compareEst && compareEst.metric_value !== est.metric_value;
               const divChanged = showChanges && compareEst && compareEst.dividend_value !== est.dividend_value;
-              
+              const maChanged = showChanges && compareEst && (compareEst.ma_value ?? null) !== (est.ma_value ?? null);
+
               return (
                 <tr key={est.fiscal_year}>
                   <td className="pr-2 text-muted-foreground">{est.fiscal_year}</td>
@@ -68,10 +70,16 @@ function EstimatesGrid({
                     {est.metric_value !== null ? est.metric_value.toFixed(2) : '—'}
                   </td>
                   <td className={cn(
-                    "text-right",
+                    "text-right pr-2",
                     divChanged && "bg-primary/20 border border-primary/50 rounded"
                   )}>
                     {est.dividend_value !== null ? est.dividend_value.toFixed(2) : '—'}
+                  </td>
+                  <td className={cn(
+                    "text-right",
+                    maChanged && "bg-primary/20 border border-primary/50 rounded"
+                  )}>
+                    {est.ma_value !== null && est.ma_value !== undefined ? est.ma_value.toFixed(2) : '—'}
                   </td>
                 </tr>
               );

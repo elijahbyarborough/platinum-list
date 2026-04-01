@@ -50,15 +50,17 @@ export async function upsertEstimate(
   fiscalYear: number,
   metricType: MetricType,
   metricValue: number | null,
-  dividendValue: number | null
+  dividendValue: number | null,
+  maValue: number | null = null
 ): Promise<Estimate> {
   const { rows } = await sql`
-    INSERT INTO estimates (company_id, fiscal_year, metric_type, metric_value, dividend_value)
-    VALUES (${companyId}, ${fiscalYear}, ${metricType}, ${metricValue}, ${dividendValue})
+    INSERT INTO estimates (company_id, fiscal_year, metric_type, metric_value, dividend_value, ma_value)
+    VALUES (${companyId}, ${fiscalYear}, ${metricType}, ${metricValue}, ${dividendValue}, ${maValue})
     ON CONFLICT (company_id, fiscal_year, metric_type)
     DO UPDATE SET
       metric_value = ${metricValue},
       dividend_value = ${dividendValue},
+      ma_value = ${maValue},
       updated_at = CURRENT_TIMESTAMP
     RETURNING *
   `;
@@ -72,19 +74,20 @@ export async function upsertEstimate(
 export async function upsertEstimates(
   companyId: number,
   metricType: MetricType,
-  estimates: { fiscal_year: number; metric_value: number | null; dividend_value: number | null }[]
+  estimates: { fiscal_year: number; metric_value: number | null; dividend_value: number | null; ma_value?: number | null }[]
 ): Promise<Estimate[]> {
   const results: Estimate[] = [];
-  
+
   for (const est of estimates) {
     // Only upsert if there's actual data
-    if (est.metric_value !== null || est.dividend_value !== null) {
+    if (est.metric_value !== null || est.dividend_value !== null || est.ma_value !== null) {
       const result = await upsertEstimate(
         companyId,
         est.fiscal_year,
         metricType,
         est.metric_value,
-        est.dividend_value
+        est.dividend_value,
+        est.ma_value ?? null
       );
       results.push(result);
     }
