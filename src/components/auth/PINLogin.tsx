@@ -88,6 +88,7 @@ export function PINLogin() {
           <div className="text-center mb-6">
             <h2 className="text-xl font-semibold text-foreground mb-2">Enter PIN</h2>
             <p className="text-sm text-muted-foreground">Please enter your 4-digit PIN to continue</p>
+            <p className="text-xs text-muted-foreground/70 italic mt-1">Hint: Office Suite #</p>
           </div>
 
           <div className="flex justify-center gap-3 mb-4">
