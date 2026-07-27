@@ -5,8 +5,10 @@ import { findExitMultiplesByCompanyId } from '../lib/models/exitMultiple.js';
 import { findEstimatesByCompanyId } from '../lib/models/estimates.js';
 import { calculate5YearIRR, hasSufficientDataForIRR } from '../lib/utils/irrCalculator.js';
 import { Company, Estimate } from '../lib/db.js';
+import { requireAuth } from '../lib/auth.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (!requireAuth(req, res)) return;
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }

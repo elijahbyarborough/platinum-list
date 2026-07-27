@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { authHeaders } from '@/utils/authToken';
 
 interface SearchResult {
   symbol: string;
@@ -66,7 +67,7 @@ export function TickerAutocomplete({
       try {
         const response = await fetch(
           `/api/search?q=${encodeURIComponent(inputValue)}`,
-          { signal: controller.signal }
+          { signal: controller.signal, headers: authHeaders() }
         );
         if (response.ok) {
           const results: SearchResult[] = await response.json();

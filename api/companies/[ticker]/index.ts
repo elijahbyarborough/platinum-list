@@ -2,8 +2,10 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { findCompanyByTicker } from '../../../lib/models/company.js';
 import { findEstimatesByCompanyId } from '../../../lib/models/estimates.js';
 import { findExitMultiplesByCompanyId } from '../../../lib/models/exitMultiple.js';
+import { requireAuth } from '../../../lib/auth.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (!requireAuth(req, res)) return;
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }

@@ -268,7 +268,7 @@ export function CompaniesTable({ companies }: CompaniesTableProps) {
                     formatPercentage(company.irr_5yr)
                   ) : (
                     <span
-                      title="Needs at least 6 years of estimates for 5-year IRR"
+                      title="IRR unavailable — needs a current stock price, an exit multiple, and metric estimates covering the 5-year forward window"
                       className="text-muted-foreground"
                     >
                       —
@@ -377,7 +377,7 @@ export function CompaniesTable({ companies }: CompaniesTableProps) {
                   formatPercentage(company.irr_5yr)
                 ) : (
                   <span
-                    title="Needs at least 6 years of estimates for 5-year IRR"
+                    title="IRR unavailable — needs a current stock price, an exit multiple, and metric estimates covering the 5-year forward window"
                     className="text-muted-foreground"
                   >
                     —

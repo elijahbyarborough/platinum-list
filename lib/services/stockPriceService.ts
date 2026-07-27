@@ -2,6 +2,11 @@ import YahooFinance from 'yahoo-finance2';
 
 const yahooFinance = new YahooFinance();
 
+// Yahoo periodically changes response fields (e.g. typeDisp 'equity' -> 'Equity'),
+// which makes the library's strict schema validation throw on otherwise-good data.
+// We read the fields we need defensively, so skip validation everywhere.
+const NO_VALIDATE = { validateResult: false } as const;
+
 export interface StockQuote {
   price: number | null;
   companyName: string | null;
@@ -20,7 +25,8 @@ export interface SearchResult {
  */
 export async function searchTickers(query: string): Promise<SearchResult[]> {
   try {
-    const results = await yahooFinance.search(query);
+    // With validation off the library types the result as unknown
+    const results = (await yahooFinance.search(query, {}, NO_VALIDATE)) as { quotes: any[] };
     return results.quotes
       .filter((quote: any) => quote.symbol)
       .slice(0, 10)
@@ -36,13 +42,51 @@ export async function searchTickers(query: string): Promise<SearchResult[]> {
   }
 }
 
+export interface PriceRefreshResult {
+  ticker: string;
+  success: boolean;
+  price?: number | null;
+  error?: string;
+}
+
+/**
+ * Refresh prices for many tickers in small batches. Yahoo rate-limits/blocks
+ * bursty unauthenticated traffic, so never fire one request per company at once.
+ * @param updatePrice - callback that persists a fetched price
+ */
+export async function refreshPricesBatched(
+  tickers: string[],
+  updatePrice: (ticker: string, price: number) => Promise<void>,
+  batchSize = 5
+): Promise<PriceRefreshResult[]> {
+  const results: PriceRefreshResult[] = [];
+  for (let i = 0; i < tickers.length; i += batchSize) {
+    const batch = tickers.slice(i, i + batchSize);
+    const batchResults = await Promise.all(batch.map(async (ticker): Promise<PriceRefreshResult> => {
+      try {
+        const price = await getPrice(ticker);
+        if (price === null) {
+          return { ticker, success: false, error: 'Price unavailable' };
+        }
+        await updatePrice(ticker, price);
+        return { ticker, success: true, price };
+      } catch (error) {
+        console.error(`Error refreshing price for ${ticker}:`, error);
+        return { ticker, success: false, error: 'Failed to fetch price' };
+      }
+    }));
+    results.push(...batchResults);
+  }
+  return results;
+}
+
 /**
  * Fetch current stock price by ticker
  */
 export async function getPrice(ticker: string): Promise<number | null> {
   try {
-    const quote = await yahooFinance.quote(ticker);
-    return quote.regularMarketPrice || null;
+    const quote = await yahooFinance.quote(ticker, {}, NO_VALIDATE);
+    return quote.regularMarketPrice ?? null;
   } catch (error) {
     console.error(`Error fetching price for ${ticker}:`, error);
     return null;
@@ -54,7 +98,7 @@ export async function getPrice(ticker: string): Promise<number | null> {
  */
 export async function getCompanyName(ticker: string): Promise<string | null> {
   try {
-    const quote = await yahooFinance.quote(ticker);
+    const quote = await yahooFinance.quote(ticker, {}, NO_VALIDATE);
     return quote.longName || quote.shortName || null;
   } catch (error) {
     console.error(`Error fetching company name for ${ticker}:`, error);
@@ -67,9 +111,9 @@ export async function getCompanyName(ticker: string): Promise<string | null> {
  */
 export async function getQuote(ticker: string): Promise<StockQuote> {
   try {
-    const quote = await yahooFinance.quote(ticker);
+    const quote = await yahooFinance.quote(ticker, {}, NO_VALIDATE);
     return {
-      price: quote.regularMarketPrice || null,
+      price: quote.regularMarketPrice ?? null,
       companyName: quote.longName || quote.shortName || null,
       fiscalYearEnd: null,
     };
@@ -89,9 +133,9 @@ export async function getQuote(ticker: string): Promise<StockQuote> {
  */
 export async function getFiscalYearEnd(ticker: string): Promise<string | null> {
   try {
-    const summary = await yahooFinance.quoteSummary(ticker, {
+    const summary = (await yahooFinance.quoteSummary(ticker, {
       modules: ['defaultKeyStatistics', 'calendarEvents'],
-    });
+    }, NO_VALIDATE)) as any;
 
     // Try defaultKeyStatistics for fiscal year end
     if (summary.defaultKeyStatistics?.lastFiscalYearEnd) {
@@ -138,7 +182,7 @@ export async function getFiscalYearEnd(ticker: string): Promise<string | null> {
  */
 export async function getCompleteQuote(ticker: string): Promise<StockQuote> {
   try {
-    const quote = await yahooFinance.quote(ticker);
+    const quote = await yahooFinance.quote(ticker, {}, NO_VALIDATE);
     
     let fiscalYearEnd: string | null = null;
     try {
@@ -148,7 +192,7 @@ export async function getCompleteQuote(ticker: string): Promise<StockQuote> {
     }
 
     return {
-      price: quote.regularMarketPrice || null,
+      price: quote.regularMarketPrice ?? null,
       companyName: quote.longName || quote.shortName || null,
       fiscalYearEnd: fiscalYearEnd,
     };

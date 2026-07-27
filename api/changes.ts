@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { sql, Estimate } from '../lib/db.js';
+import { requireAuth } from '../lib/auth.js';
 
 interface ChangeSnapshot {
   submitted_at: string;
@@ -43,6 +44,7 @@ function extractEstimatesFromSnapshot(snapshot: any): Estimate[] {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (!requireAuth(req, res)) return;
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }

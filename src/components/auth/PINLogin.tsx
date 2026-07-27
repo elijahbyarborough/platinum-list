@@ -6,7 +6,21 @@ export function PINLogin() {
   const { authenticate } = useAuth();
   const [pin, setPin] = useState<string[]>(['', '', '', '']);
   const [error, setError] = useState(false);
+  const [checking, setChecking] = useState(false);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  const submitPin = async (digits: string[]) => {
+    setChecking(true);
+    const ok = await authenticate(digits.join(''));
+    setChecking(false);
+    if (!ok) {
+      setError(true);
+      setPin(['', '', '', '']);
+      inputRefs.current[0]?.focus();
+    } else {
+      inputRefs.current[3]?.blur();
+    }
+  };
 
   useEffect(() => {
     // Focus first input on mount
@@ -29,12 +43,7 @@ export function PINLogin() {
 
     // If all 4 digits are entered, check PIN
     if (newPin.every(digit => digit !== '') && index === 3) {
-      const pinString = newPin.join('');
-      if (!authenticate(pinString)) {
-        setError(true);
-        setPin(['', '', '', '']);
-        inputRefs.current[0]?.focus();
-      }
+      submitPin(newPin);
     }
   };
 
@@ -42,25 +51,6 @@ export function PINLogin() {
     // Handle backspace
     if (e.key === 'Backspace' && !pin[index] && index > 0) {
       inputRefs.current[index - 1]?.focus();
-    }
-    // Handle paste
-    if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-      e.preventDefault();
-      navigator.clipboard.readText().then(text => {
-        if (/^\d{4}$/.test(text)) {
-          const digits = text.split('');
-          setPin(digits);
-          setError(false);
-          const pinString = digits.join('');
-          if (!authenticate(pinString)) {
-            setError(true);
-            setPin(['', '', '', '']);
-            inputRefs.current[0]?.focus();
-          } else {
-            inputRefs.current[3]?.blur();
-          }
-        }
-      }).catch(() => {});
     }
   };
 
@@ -71,14 +61,7 @@ export function PINLogin() {
       const digits = pastedText.split('');
       setPin(digits);
       setError(false);
-      const pinString = digits.join('');
-      if (!authenticate(pinString)) {
-        setError(true);
-        setPin(['', '', '', '']);
-        inputRefs.current[0]?.focus();
-      } else {
-        inputRefs.current[3]?.blur();
-      }
+      submitPin(digits);
     }
   };
 
@@ -121,6 +104,7 @@ export function PINLogin() {
                 onChange={(e) => handleChange(index, e.target.value)}
                 onKeyDown={(e) => handleKeyDown(index, e)}
                 onPaste={handlePaste}
+                disabled={checking}
                 className={cn(
                   'w-14 h-14 text-center text-2xl font-semibold rounded-xl border-2 transition-all duration-200',
                   'focus:outline-none focus:ring-2 focus:ring-offset-2',

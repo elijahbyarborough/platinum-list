@@ -136,8 +136,16 @@ When using Vercel Postgres, these are automatically configured:
 - `POSTGRES_URL` - Database connection string
 - `POSTGRES_URL_NON_POOLING` - For migrations
 
-Optional:
-- `CRON_SECRET` - Secure cron endpoint authentication
+Required in production:
+- `APP_PIN` - The 4-digit PIN. The login endpoint verifies it server-side and
+  issues a token that every API route requires. If unset in production, login
+  returns an error (fails closed). In local dev, auth is skipped when unset.
+- `CRON_SECRET` - Secures the cron endpoints (`/api/cron/refresh-prices`,
+  `/api/generate-snapshot`). Vercel sends it automatically for cron
+  invocations once set. Logged-in users' tokens are also accepted so the
+  endpoints can be triggered manually.
+
+Changing `APP_PIN` invalidates everyone's session; they just re-enter the new PIN.
 
 ## Features
 
@@ -162,4 +170,9 @@ If migrating from the previous SQLite-based local setup:
 - Function timeout: 60 seconds (Pro plan), 10 seconds (Hobby plan)
 - Cron jobs require Vercel Pro plan
 - Stock prices refresh daily at 9 AM ET (14:00 UTC) on weekdays
-- Companies need at least 6 years of estimates for 5-year IRR calculation
+- The IRR needs a current price, an exit multiple, and metric estimates
+  covering the 5-year forward window
+- `companies.updated_at` means "last analyst submission" and is set explicitly
+  by the submission endpoint; price refreshes only touch `price_last_updated`.
+  On an existing database, run `node scripts/drop-companies-updated-at-trigger.mjs`
+  once (with `.env.local` pulled) to drop the old trigger that broke this.

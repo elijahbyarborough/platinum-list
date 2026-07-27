@@ -1,4 +1,4 @@
-import { sql, parseEstimateRow, Estimate, MetricType } from '../db.js';
+import { sql, parseEstimateRow, Estimate, MetricType, SqlFn } from '../db.js';
 
 /**
  * Find all estimates for a company, optionally filtered by metric type.
@@ -7,17 +7,18 @@ import { sql, parseEstimateRow, Estimate, MetricType } from '../db.js';
  */
 export async function findEstimatesByCompanyId(
   companyId: number,
-  metricType?: MetricType
+  metricType?: MetricType,
+  q: SqlFn = sql
 ): Promise<Estimate[]> {
   if (metricType) {
-    const { rows } = await sql`
+    const { rows } = await q`
       SELECT * FROM estimates
       WHERE company_id = ${companyId} AND metric_type = ${metricType}
       ORDER BY fiscal_year ASC
     `;
     return rows.map(parseEstimateRow);
   } else {
-    const { rows } = await sql`
+    const { rows } = await q`
       SELECT * FROM estimates
       WHERE company_id = ${companyId}
       ORDER BY fiscal_year ASC
@@ -68,32 +69,31 @@ export async function upsertEstimate(
 }
 
 /**
- * Upsert multiple estimates for a company with a specific metric type.
- * Old estimates for other metric types are NOT touched.
+ * Replace all estimates for (company, metric type) with the given rows.
+ * Delete-then-insert (inside the caller's transaction) so that years the
+ * analyst cleared actually disappear instead of surviving as stale rows.
+ * Estimates for other metric types are NOT touched.
  */
-export async function upsertEstimates(
+export async function replaceEstimates(
+  tx: SqlFn,
   companyId: number,
   metricType: MetricType,
   estimates: { fiscal_year: number; metric_value: number | null; dividend_value: number | null; ma_value?: number | null }[]
-): Promise<Estimate[]> {
-  const results: Estimate[] = [];
+): Promise<void> {
+  await tx`
+    DELETE FROM estimates
+    WHERE company_id = ${companyId} AND metric_type = ${metricType}
+  `;
 
   for (const est of estimates) {
-    // Only upsert if there's actual data
-    if (est.metric_value !== null || est.dividend_value !== null || est.ma_value !== null) {
-      const result = await upsertEstimate(
-        companyId,
-        est.fiscal_year,
-        metricType,
-        est.metric_value,
-        est.dividend_value,
-        est.ma_value ?? null
-      );
-      results.push(result);
+    // Skip all-blank rows
+    if (est.metric_value !== null || est.dividend_value !== null || (est.ma_value ?? null) !== null) {
+      await tx`
+        INSERT INTO estimates (company_id, fiscal_year, metric_type, metric_value, dividend_value, ma_value)
+        VALUES (${companyId}, ${est.fiscal_year}, ${metricType}, ${est.metric_value}, ${est.dividend_value}, ${est.ma_value ?? null})
+      `;
     }
   }
-  
-  return results;
 }
 
 /**
@@ -116,15 +116,16 @@ export async function deleteEstimate(
  */
 export async function deleteAllEstimatesForCompany(
   companyId: number,
-  metricType?: MetricType
+  metricType?: MetricType,
+  q: SqlFn = sql
 ): Promise<void> {
   if (metricType) {
-    await sql`
-      DELETE FROM estimates 
+    await q`
+      DELETE FROM estimates
       WHERE company_id = ${companyId} AND metric_type = ${metricType}
     `;
   } else {
-    await sql`
+    await q`
       DELETE FROM estimates WHERE company_id = ${companyId}
     `;
   }

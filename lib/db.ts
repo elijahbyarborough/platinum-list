@@ -1,7 +1,36 @@
-import { sql } from '@vercel/postgres';
+import { sql, db } from '@vercel/postgres';
 
 // Re-export sql for direct queries
 export { sql };
+
+// Tagged-template query function — satisfied by both the pooled `sql` export
+// and a dedicated client inside a transaction
+export type SqlFn = (strings: TemplateStringsArray, ...values: any[]) => Promise<{ rows: any[] }>;
+
+/**
+ * Run `fn` inside a single-connection BEGIN/COMMIT transaction. All queries that
+ * must be atomic (or must see each other's uncommitted writes) have to go
+ * through the `tx` function passed to the callback, not the pooled `sql`.
+ */
+export async function withTransaction<T>(fn: (tx: SqlFn) => Promise<T>): Promise<T> {
+  const client = await db.connect();
+  const tx: SqlFn = (strings, ...values) => client.sql(strings, ...values);
+  try {
+    await client.sql`BEGIN`;
+    const result = await fn(tx);
+    await client.sql`COMMIT`;
+    return result;
+  } catch (error) {
+    try {
+      await client.sql`ROLLBACK`;
+    } catch {
+      // connection is broken; release below
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 
 // Type definitions
 export type MetricType = 'GAAP EPS' | 'Norm. EPS' | 'Mgmt. EPS' | 'FCFPS' | 'DEPS' | 'NAVPS' | 'BVPS' | 'DPS' | 'Other';
@@ -63,7 +92,7 @@ export function parseCompanyRow(row: any): Company {
     fiscal_year_end_date: row.fiscal_year_end_date instanceof Date 
       ? row.fiscal_year_end_date.toISOString().split('T')[0]
       : row.fiscal_year_end_date,
-    current_stock_price: row.current_stock_price ? Number(row.current_stock_price) : null,
+    current_stock_price: row.current_stock_price != null ? Number(row.current_stock_price) : null,
   };
 }
 
@@ -72,15 +101,15 @@ export function parseEstimateRow(row: any): Estimate {
     ...row,
     fiscal_year: Number(row.fiscal_year),
     metric_type: row.metric_type,
-    metric_value: row.metric_value ? Number(row.metric_value) : null,
-    dividend_value: row.dividend_value ? Number(row.dividend_value) : null,
-    ma_value: row.ma_value ? Number(row.ma_value) : null,
+    metric_value: row.metric_value != null ? Number(row.metric_value) : null,
+    dividend_value: row.dividend_value != null ? Number(row.dividend_value) : null,
+    ma_value: row.ma_value != null ? Number(row.ma_value) : null,
   };
 }
 
 export function parseExitMultipleRow(row: any): ExitMultiple {
   return {
     ...row,
-    multiple: row.multiple ? Number(row.multiple) : 0,
+    multiple: row.multiple != null ? Number(row.multiple) : 0,
   };
 }

@@ -4,9 +4,10 @@ import { findAllCompanies, updateCompanyPrice } from '../../lib/models/company.j
 import { findEstimatesByCompanyId } from '../../lib/models/estimates.js';
 import { findExitMultiplesByCompanyId } from '../../lib/models/exitMultiple.js';
 import { calculate5YearIRR, hasSufficientDataForIRR } from '../../lib/utils/irrCalculator.js';
-import { getPrice } from '../../lib/services/stockPriceService.js';
+import { refreshPricesBatched } from '../../lib/services/stockPriceService.js';
 import { put } from '@vercel/blob';
 import PDFDocument from 'pdfkit';
+import { requireCron } from '../../lib/auth.js';
 
 /**
  * Generate a PDF snapshot of the dashboard
@@ -14,31 +15,16 @@ import PDFDocument from 'pdfkit';
  * It automatically refreshes prices before generating the PDF to ensure fresh data
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Verify this is called from Vercel Cron (optional security check)
-  const authHeader = req.headers.authorization;
-  if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    // Allow manual calls in development or when CRON_SECRET is not set
-    if (process.env.NODE_ENV === 'production' && process.env.CRON_SECRET) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-  }
+  if (!requireCron(req, res)) return;
 
   try {
     // Refresh prices before generating PDF to ensure fresh data
     console.log('[Snapshot] Refreshing prices before PDF generation...');
     const allCompanies = await findAllCompanies();
-    const refreshPromises = allCompanies.map(async (company) => {
-      try {
-        const price = await getPrice(company.ticker);
-        if (price !== null) {
-          await updateCompanyPrice(company.ticker, price);
-          console.log(`[Snapshot] Updated ${company.ticker}: $${price}`);
-        }
-      } catch (error) {
-        console.error(`[Snapshot] Error refreshing price for ${company.ticker}:`, error);
-      }
-    });
-    await Promise.all(refreshPromises);
+    await refreshPricesBatched(
+      allCompanies.map((c) => c.ticker),
+      updateCompanyPrice
+    );
     console.log('[Snapshot] Price refresh completed');
 
     // Get today's date in ET timezone for the snapshot
@@ -110,7 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (error: any) {
     console.error('Error generating snapshot:', error);
     return res.status(500).json({
-      error: error?.message || 'Failed to generate snapshot',
+      error: 'Failed to generate snapshot',
     });
   }
 }

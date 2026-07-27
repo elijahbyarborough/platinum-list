@@ -1,25 +1,62 @@
-import { getMetricForYear, getDividendForYear, getMaValueForYear, calculateYearFraction, getCurrentFiscalYear, getFiscalYearForDate, calculateYearFractionForDate } from './fiscalYear.js';
-import { Company, Estimate } from '../db.js';
+/**
+ * 5-year expected-return (IRR) calculator.
+ *
+ * Single source of truth used by BOTH the serverless API (dashboard, PDF
+ * snapshots) and the browser (submission form preview via
+ * src/utils/irrCalculator.ts, which re-exports this module). Keep it free of
+ * imports from lib/db.ts or anything Node-specific — any change here shows up
+ * identically on both sides.
+ */
+
+import {
+  EstimateLike,
+  getMetricForYear,
+  getDividendForYear,
+  getMaValueForYear,
+  getCurrentFiscalYear,
+  getFiscalYearForDate,
+  calculateYearFractionForDate,
+  parseDateOnly,
+} from './fiscalYear.js';
+
+export type { EstimateLike };
+
+// Structural type satisfied by the DB Company row and snapshot objects
+export interface CompanyLike {
+  fiscal_year_end_date: string;
+  current_stock_price: number | null;
+}
+
+const MIN_RATE = -0.99;
+const MAX_RATE = 10;
+
+function npvAt(rate: number, cashFlows: number[], times: number[]): number {
+  let npv = 0;
+  for (let j = 0; j < cashFlows.length; j++) {
+    npv += cashFlows[j] * Math.pow(1 + rate, -times[j]);
+  }
+  return npv;
+}
 
 /**
- * Calculate IRR using Newton-Raphson method
- * Cash flows: [initial investment (negative), ...dividends, final price]
- * Times: [0, ...dividend times in years, 5]
+ * Solve for IRR: Newton-Raphson first (fast), bisection as fallback.
+ * With this cash-flow shape (one negative flow at t=0, positive flows after)
+ * NPV is strictly decreasing in rate, so if NPV changes sign on
+ * [MIN_RATE, MAX_RATE] bisection is guaranteed to find the root — deeply
+ * negative expected returns now come back as numbers instead of null.
  */
 function calculateIRR(cashFlows: number[], times: number[]): number | null {
   if (cashFlows.length !== times.length || cashFlows.length < 2) {
     return null;
   }
 
-  // Initial guess: use a simple approximation
-  let rate = 0.1; // Start with 10%
-  const maxIterations = 100;
   const tolerance = 1e-6;
 
-  for (let i = 0; i < maxIterations; i++) {
+  // Newton-Raphson
+  let rate = 0.1; // Start with 10%
+  for (let i = 0; i < 100; i++) {
     let npv = 0;
     let npvDerivative = 0;
-
     for (let j = 0; j < cashFlows.length; j++) {
       const cf = cashFlows[j];
       const t = times[j];
@@ -31,77 +68,78 @@ function calculateIRR(cashFlows: number[], times: number[]): number | null {
     if (Math.abs(npv) < tolerance) {
       return rate;
     }
-
     if (Math.abs(npvDerivative) < tolerance) {
-      break; // Can't converge
+      break; // Flat derivative — fall through to bisection
     }
 
     rate = rate - npv / npvDerivative;
-
-    // Prevent negative rates or rates that are too high
-    if (rate < -0.99 || rate > 10) {
-      return null;
+    if (rate < MIN_RATE || rate > MAX_RATE) {
+      break; // Overshot the bracket — fall through to bisection
     }
   }
 
-  return null; // Didn't converge
+  // Bisection fallback on [MIN_RATE, MAX_RATE]
+  let lo = MIN_RATE;
+  let hi = MAX_RATE;
+  let npvLo = npvAt(lo, cashFlows, times);
+  const npvHi = npvAt(hi, cashFlows, times);
+  if (npvLo === 0) return lo;
+  if (npvHi === 0) return hi;
+  if (npvLo * npvHi > 0) {
+    return null; // No root in bracket (e.g. all-positive or all-negative flows)
+  }
+  for (let i = 0; i < 200; i++) {
+    const mid = (lo + hi) / 2;
+    const npvMid = npvAt(mid, cashFlows, times);
+    if (Math.abs(npvMid) < tolerance || (hi - lo) / 2 < 1e-9) {
+      return mid;
+    }
+    if (npvLo * npvMid < 0) {
+      hi = mid;
+    } else {
+      lo = mid;
+      npvLo = npvMid;
+    }
+  }
+  return (lo + hi) / 2;
+}
+
+interface InterpolationResult {
+  forwardFY: number;
+  nextFY: number;
+  forwardMetric: number | null;
+  nextMetric: number | null;
+  yearFraction: number;
+  interpolatedMetric: number | null;
+  interpolatedMaValue: number;
 }
 
 /**
- * Calculate 5-year Expected Return (IRR) for a company
- * 
- * Formula:
- * 1. futurePrice = interpolatedMetric × exitMultiple
- * 2. priceCAGR = (futurePrice / currentPrice)^(1/5) - 1
- * 3. totalDividends = sum of dividends for years 1-5 (with year 5 interpolated)
- * 4. avgDividendYield = (totalDividends / 5) / currentPrice
- * 5. expectedReturn = priceCAGR + avgDividendYield
- * 
- * The "5-year forward" metric is calculated as exactly 5 years from today,
- * not "Year 5 of the fiscal cycle"
- * 
- * @param company - Company object with fiscal year end date
- * @param estimates - Array of estimates for the company
- * @param exitMultiple - Exit multiple for 5-year horizon
- * @returns Calculated IRR as decimal (e.g., 0.15 for 15%) or null if insufficient data
+ * Interpolate the metric and M&A value at the date exactly 5 years from today.
+ * The "5-year forward" metric is calculated as exactly 5 years out, not
+ * "Year 5 of the fiscal cycle".
  */
-export function calculate5YearIRR(
-  company: Company,
-  estimates: Estimate[],
-  exitMultiple: number
-): number | null {
-  if (!company.current_stock_price || company.current_stock_price <= 0) {
-    return null; // Need current price
-  }
-  
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  
-  // Calculate the date exactly 5 years from today
-  const fiveYearsFromNow = new Date(today);
-  fiveYearsFromNow.setFullYear(today.getFullYear() + 5);
-  
-  // Get the fiscal year for the 5-year forward date
-  const forwardFY = getFiscalYearForDate(fiveYearsFromNow, company.fiscal_year_end_date);
+function interpolateAtFiveYears(
+  estimates: EstimateLike[],
+  fiscalYearEndDate: string,
+  today: Date,
+  fiveYearsFromNow: Date
+): InterpolationResult {
+  const forwardFY = getFiscalYearForDate(fiveYearsFromNow, fiscalYearEndDate);
   const nextFY = forwardFY + 1;
-  
-  // Get metrics for the fiscal years we need to interpolate between
+
   const forwardMetric = getMetricForYear(estimates, forwardFY);
   const nextMetric = getMetricForYear(estimates, nextFY);
 
-  if (forwardMetric === null || nextMetric === null) {
-    return null; // Insufficient data
-  }
+  // yearFraction = 1.0 at start of FY, 0.0 at end of FY.
+  // Early in the FY -> weight forwardFY more; late -> weight nextFY more.
+  const yearFraction = calculateYearFractionForDate(fiveYearsFromNow, fiscalYearEndDate);
 
-  // Calculate year fraction for the 5-year forward date within its fiscal year
-  const yearFraction = calculateYearFractionForDate(fiveYearsFromNow, company.fiscal_year_end_date);
+  const interpolatedMetric = (forwardMetric !== null && nextMetric !== null)
+    ? (yearFraction * forwardMetric) + ((1 - yearFraction) * nextMetric)
+    : null;
 
-  // Interpolate: (yearFraction × forwardFY) + ((1 - yearFraction) × nextFY)
-  // yearFraction = 1.0 at start of FY, 0.0 at end of FY
-  // So if we're early in the FY, use more of forwardFY; if late, use more of nextFY
-  const interpolatedMetric = (yearFraction * forwardMetric) + ((1 - yearFraction) * nextMetric);
-
-  // Interpolate M&A value at 5-year mark (same interpolation logic as metric)
+  // Interpolate M&A value at the 5-year mark (same interpolation logic as metric)
   const forwardMaValue = getMaValueForYear(estimates, forwardFY);
   const nextMaValue = getMaValueForYear(estimates, nextFY);
   let interpolatedMaValue = 0;
@@ -113,171 +151,278 @@ export function calculate5YearIRR(
     interpolatedMaValue = nextMaValue;
   }
 
-  // Calculate future price: (EPS * Multiple) + M&A Value
-  const futurePrice = (interpolatedMetric * exitMultiple) + interpolatedMaValue;
-  
-  // Calculate price CAGR: (futurePrice / currentPrice)^(1/5) - 1
-  const priceCAGR = Math.pow(futurePrice / company.current_stock_price, 1 / 5) - 1;
-  
-  // Calculate IRR using cash flows with proper timing
-  // Build cash flow array: [-currentPrice at t=0, dividends at their times, +futurePrice at t=5]
-  const currentFY = getCurrentFiscalYear(company.fiscal_year_end_date);
-  const fye = new Date(company.fiscal_year_end_date);
-  fye.setHours(0, 0, 0, 0);
-  
-  const cashFlows: number[] = [-company.current_stock_price]; // Initial investment (negative)
+  return { forwardFY, nextFY, forwardMetric, nextMetric, yearFraction, interpolatedMetric, interpolatedMaValue };
+}
+
+/**
+ * Build the dated cash-flow series: [-currentPrice at t=0, dividends at their
+ * (midpoint) payment times, +exitPrice at t=5].
+ */
+function buildCashFlows(
+  currentPrice: number,
+  fiscalYearEndDate: string,
+  estimates: EstimateLike[],
+  exitPrice: number,
+  today: Date,
+  fiveYearsFromNow: Date
+): { cashFlows: number[]; times: number[] } {
+  const currentFY = getCurrentFiscalYear(fiscalYearEndDate);
+  const fye = parseDateOnly(fiscalYearEndDate);
+
+  const cashFlows: number[] = [-currentPrice]; // Initial investment (negative)
   const times: number[] = [0]; // Time 0
-  
-  // Calculate the fraction remaining in the current fiscal year
-  const currentYearFraction = calculateYearFractionForDate(today, company.fiscal_year_end_date);
-  
-  // Helper function to get fiscal year start and end dates
+
+  // Fraction remaining in the current fiscal year
+  const currentYearFraction = calculateYearFractionForDate(today, fiscalYearEndDate);
+
+  const msPerYear = 1000 * 60 * 60 * 24 * 365.25;
+
   const getFiscalYearDates = (fiscalYear: number): { start: Date; end: Date } => {
     const fyStart = new Date(fiscalYear - 1, fye.getMonth(), fye.getDate());
     fyStart.setDate(fyStart.getDate() + 1); // Day after previous FYE
     fyStart.setHours(0, 0, 0, 0);
-    
+
     const fyEnd = new Date(fiscalYear, fye.getMonth(), fye.getDate());
     fyEnd.setHours(0, 0, 0, 0);
-    
+
     return { start: fyStart, end: fyEnd };
   };
-  
-  // Handle current fiscal year dividend (partial, paid proportionally between today and FY end)
+
+  const pushFlow = (amount: number, paymentMs: number) => {
+    const yearsFromToday = (paymentMs - today.getTime()) / msPerYear;
+    if (amount > 0 && yearsFromToday > 0 && yearsFromToday <= 5) {
+      cashFlows.push(amount);
+      times.push(yearsFromToday);
+    }
+  };
+
+  // Current fiscal year dividend: pro-rated for remaining time, paid at the
+  // midpoint between today and FY end
   const currentFYDiv = getDividendForYear(estimates, currentFY);
   if (currentFYDiv && currentFYDiv > 0) {
     const { end: currentFYEnd } = getFiscalYearDates(currentFY);
-    
-    // Only include if FY end is within 5 years
     if (currentFYEnd <= fiveYearsFromNow) {
-      // Pro-rate the dividend for remaining time
       const partialDiv = currentYearFraction * currentFYDiv;
-      
-      if (partialDiv > 0) {
-        // Payment time is proportionally between today and FY end
-        // Use the midpoint (1/2 of the way through the remaining period)
-        const msRemaining = currentFYEnd.getTime() - today.getTime();
-        const paymentOffset = msRemaining * 0.5; // Midpoint
-        const paymentDate = new Date(today.getTime() + paymentOffset);
-        
-        const msDiff = paymentDate.getTime() - today.getTime();
-        const yearsFromToday = msDiff / (1000 * 60 * 60 * 24 * 365.25);
-        
-        if (yearsFromToday > 0 && yearsFromToday <= 5) {
-          cashFlows.push(partialDiv);
-          times.push(yearsFromToday);
-        }
-      }
+      const paymentMs = today.getTime() + (currentFYEnd.getTime() - today.getTime()) * 0.5;
+      pushFlow(partialDiv, paymentMs);
     }
   }
-  
-  // Handle full fiscal year dividends (FY+1 through FY+4, paid proportionally between FY start and end)
+
+  // Full fiscal year dividends (FY+1 through FY+4), paid at the FY midpoint
   for (let fy = currentFY + 1; fy <= currentFY + 4; fy++) {
     const div = getDividendForYear(estimates, fy);
     if (div && div > 0) {
       const { start: fyStart, end: fyEnd } = getFiscalYearDates(fy);
-      
-      // Only include if FY end is within 5 years
       if (fyEnd <= fiveYearsFromNow) {
-        // Payment time is proportionally between FY start and end
-        // Use the midpoint (1/2 of the way through the fiscal year)
-        const fyMs = fyEnd.getTime() - fyStart.getTime();
-        const paymentOffset = fyMs * 0.5; // Midpoint
-        const paymentDate = new Date(fyStart.getTime() + paymentOffset);
-        
-        const msDiff = paymentDate.getTime() - today.getTime();
-        const yearsFromToday = msDiff / (1000 * 60 * 60 * 24 * 365.25);
-        
-        if (yearsFromToday > 0 && yearsFromToday <= 5) {
-          cashFlows.push(div);
-          times.push(yearsFromToday);
-        }
+        const paymentMs = fyStart.getTime() + (fyEnd.getTime() - fyStart.getTime()) * 0.5;
+        pushFlow(div, paymentMs);
       }
     }
   }
-  
-  // Handle final fiscal year dividend (FY+5, partial if needed, paid between FY start and 5-year mark)
+
+  // Final fiscal year dividend (FY+5): full if the FY ends within 5 years,
+  // otherwise pro-rated up to the 5-year mark; paid at the period midpoint
   const fy5Div = getDividendForYear(estimates, currentFY + 5);
   if (fy5Div && fy5Div > 0) {
     const { start: fy5Start, end: fy5End } = getFiscalYearDates(currentFY + 5);
-    
     if (fy5End <= fiveYearsFromNow) {
-      // Full dividend if FY5 ends before 5-year mark
-      // Payment time is proportionally between FY start and end
-      // Use the midpoint (1/2 of the way through the fiscal year)
-      const fy5Ms = fy5End.getTime() - fy5Start.getTime();
-      const paymentOffset = fy5Ms * 0.5; // Midpoint
-      const paymentDate = new Date(fy5Start.getTime() + paymentOffset);
-      
-      const msDiff = paymentDate.getTime() - today.getTime();
-      const yearsFromToday = msDiff / (1000 * 60 * 60 * 24 * 365.25);
-      if (yearsFromToday > 0 && yearsFromToday <= 5) {
-        cashFlows.push(fy5Div);
-        times.push(yearsFromToday);
-      }
+      const paymentMs = fy5Start.getTime() + (fy5End.getTime() - fy5Start.getTime()) * 0.5;
+      pushFlow(fy5Div, paymentMs);
     } else {
-      // Partial dividend if FY5 extends beyond 5-year mark
-      // Calculate what fraction of FY5 has elapsed by the 5-year mark
       const fy5Ms = fy5End.getTime() - fy5Start.getTime();
       const elapsedMs = fiveYearsFromNow.getTime() - fy5Start.getTime();
       const fraction = Math.max(0, Math.min(1, elapsedMs / fy5Ms));
       const partialDiv = fraction * fy5Div;
-      
-      if (partialDiv > 0) {
-        // Payment time is proportionally between FY start and 5-year mark
-        // Use the midpoint (1/2 of the way through the period)
-        const periodMs = fiveYearsFromNow.getTime() - fy5Start.getTime();
-        const paymentOffset = periodMs * 0.5; // Midpoint
-        const paymentDate = new Date(fy5Start.getTime() + paymentOffset);
-        
-        const msDiff = paymentDate.getTime() - today.getTime();
-        const yearsFromToday = msDiff / (1000 * 60 * 60 * 24 * 365.25);
-        if (yearsFromToday > 0 && yearsFromToday <= 5) {
-          cashFlows.push(partialDiv);
-          times.push(yearsFromToday);
-        }
-      }
+      const paymentMs = fy5Start.getTime() + (fiveYearsFromNow.getTime() - fy5Start.getTime()) * 0.5;
+      pushFlow(partialDiv, paymentMs);
     }
   }
-  
-  // Add final price at exactly 5 years
-  cashFlows.push(futurePrice);
+
+  // Exit price at exactly 5 years
+  cashFlows.push(exitPrice);
   times.push(5.0);
-  
-  // Calculate IRR using Newton-Raphson
-  const irr = calculateIRR(cashFlows, times);
-  
-  return irr;
+
+  return { cashFlows, times };
+}
+
+function getTodayAndFiveYearsOut(): { today: Date; fiveYearsFromNow: Date } {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const fiveYearsFromNow = new Date(today);
+  fiveYearsFromNow.setFullYear(today.getFullYear() + 5);
+  return { today, fiveYearsFromNow };
 }
 
 /**
- * Check if company has sufficient data for 5-year IRR calculation
- * Requires: Metrics for the fiscal year that contains the 5-year forward date and the next fiscal year
+ * Calculate the 5-year expected return (IRR) for a company.
+ *
+ * Exit price at t=5 is (interpolated metric x exit multiple) + interpolated
+ * M&A value; dividends are laid out at their estimated payment midpoints and
+ * the IRR is solved from the full dated cash-flow series.
+ *
+ * @returns IRR as a decimal (e.g., 0.15 for 15%) or null if insufficient data
+ */
+export function calculate5YearIRR(
+  company: CompanyLike,
+  estimates: EstimateLike[],
+  exitMultiple: number
+): number | null {
+  if (!company.current_stock_price || company.current_stock_price <= 0) {
+    return null; // Need current price
+  }
+
+  const { today, fiveYearsFromNow } = getTodayAndFiveYearsOut();
+
+  const interp = interpolateAtFiveYears(estimates, company.fiscal_year_end_date, today, fiveYearsFromNow);
+  if (interp.interpolatedMetric === null) {
+    return null; // Insufficient data
+  }
+
+  // Exit price: (metric x multiple) + M&A value
+  const exitPrice = (interp.interpolatedMetric * exitMultiple) + interp.interpolatedMaValue;
+
+  const { cashFlows, times } = buildCashFlows(
+    company.current_stock_price,
+    company.fiscal_year_end_date,
+    estimates,
+    exitPrice,
+    today,
+    fiveYearsFromNow
+  );
+
+  return calculateIRR(cashFlows, times);
+}
+
+/**
+ * Check if company has sufficient data for the 5-year IRR calculation:
+ * a positive current price plus metric estimates for the fiscal year containing
+ * the 5-year forward date and the following fiscal year.
  */
 export function hasSufficientDataForIRR(
-  company: Company,
-  estimates: Estimate[]
+  company: CompanyLike,
+  estimates: EstimateLike[]
 ): boolean {
   if (!company.current_stock_price || company.current_stock_price <= 0) {
     return false;
   }
-  
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  
-  // Calculate the date exactly 5 years from today
-  const fiveYearsFromNow = new Date(today);
-  fiveYearsFromNow.setFullYear(today.getFullYear() + 5);
-  
-  // Get the fiscal year for the 5-year forward date
+
+  const { fiveYearsFromNow } = getTodayAndFiveYearsOut();
   const forwardFY = getFiscalYearForDate(fiveYearsFromNow, company.fiscal_year_end_date);
-  const nextFY = forwardFY + 1;
-  
-  const forwardMetric = getMetricForYear(estimates, forwardFY);
-  const nextMetric = getMetricForYear(estimates, nextFY);
-  
+
   return (
-    forwardMetric !== null &&
-    nextMetric !== null
+    getMetricForYear(estimates, forwardFY) !== null &&
+    getMetricForYear(estimates, forwardFY + 1) !== null
   );
+}
+
+export interface IRRInput {
+  currentPrice: number | null;
+  exitMultiple: number | null;
+  fiscalYearEndDate: string;
+  estimates: EstimateLike[];
+}
+
+export interface IRRResult {
+  irr: number | null;
+  priceCAGR: number | null;
+  dividendYield: number | null;
+  averageDividend: number | null;
+  futurePrice: number | null;
+  interpolatedMetric: number | null;
+  interpolatedMaValue: number | null;
+  totalPrice: number | null;
+  missingData: string[];
+}
+
+/**
+ * Rich version of the calculation for the submission form preview: same IRR as
+ * calculate5YearIRR, plus the display components (price CAGR, average dividend
+ * yield, interpolated values) and a list of what's missing.
+ */
+export function calculate5YearIRRPreview(input: IRRInput): IRRResult {
+  const missingData: string[] = [];
+
+  if (!input.currentPrice || input.currentPrice <= 0) {
+    missingData.push('Current stock price');
+  }
+  if (!input.exitMultiple || input.exitMultiple <= 0) {
+    missingData.push('Exit multiple');
+  }
+  if (!input.fiscalYearEndDate) {
+    missingData.push('Fiscal year end date');
+  }
+
+  const emptyResult: IRRResult = {
+    irr: null,
+    priceCAGR: null,
+    dividendYield: null,
+    averageDividend: null,
+    futurePrice: null,
+    interpolatedMetric: null,
+    interpolatedMaValue: null,
+    totalPrice: null,
+    missingData,
+  };
+
+  if (!input.fiscalYearEndDate) {
+    return emptyResult;
+  }
+
+  const { today, fiveYearsFromNow } = getTodayAndFiveYearsOut();
+
+  const interp = interpolateAtFiveYears(input.estimates, input.fiscalYearEndDate, today, fiveYearsFromNow);
+  if (interp.forwardMetric === null) {
+    missingData.push(`FY ${interp.forwardFY} metric estimate`);
+  }
+  if (interp.nextMetric === null) {
+    missingData.push(`FY ${interp.nextFY} metric estimate`);
+  }
+
+  if (missingData.length > 0) {
+    return { ...emptyResult, missingData };
+  }
+
+  const currentPrice = input.currentPrice!;
+  const exitMultiple = input.exitMultiple!;
+  const interpolatedMetric = interp.interpolatedMetric!;
+  const interpolatedMaValue = interp.interpolatedMaValue;
+
+  // The metric-implied price, with M&A value added on top for the total at exit
+  const futurePrice = interpolatedMetric * exitMultiple;
+  const totalPrice = futurePrice + interpolatedMaValue;
+
+  // Price CAGR based on the total exit price (what you actually receive)
+  const priceCAGR = Math.pow(totalPrice / currentPrice, 1 / 5) - 1;
+
+  const { cashFlows, times } = buildCashFlows(
+    currentPrice,
+    input.fiscalYearEndDate,
+    input.estimates,
+    totalPrice,
+    today,
+    fiveYearsFromNow
+  );
+  const irr = calculateIRR(cashFlows, times);
+
+  // Average dividend for display (legacy formula, shown for reference)
+  const currentFY = getCurrentFiscalYear(input.fiscalYearEndDate);
+  const currentYearFraction = calculateYearFractionForDate(today, input.fiscalYearEndDate);
+  const divFor = (fy: number) => getDividendForYear(input.estimates, fy) ?? 0;
+  const totalDividends = (currentYearFraction * divFor(currentFY)) +
+    divFor(currentFY + 1) + divFor(currentFY + 2) + divFor(currentFY + 3) + divFor(currentFY + 4) +
+    ((1 - currentYearFraction) * divFor(currentFY + 5));
+  const averageDividend = totalDividends / 5;
+  const avgDividendYield = averageDividend / currentPrice;
+
+  return {
+    irr,
+    priceCAGR,
+    dividendYield: avgDividendYield,
+    averageDividend,
+    futurePrice,
+    interpolatedMetric,
+    interpolatedMaValue: interpolatedMaValue > 0 ? interpolatedMaValue : null,
+    totalPrice,
+    missingData: [],
+  };
 }

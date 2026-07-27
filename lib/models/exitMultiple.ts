@@ -1,11 +1,12 @@
-import { sql, parseExitMultipleRow, ExitMultiple } from '../db.js';
+import { sql, parseExitMultipleRow, ExitMultiple, SqlFn } from '../db.js';
 
 export async function findExitMultiplesByCompanyId(
-  companyId: number, 
-  timeHorizon?: number
+  companyId: number,
+  timeHorizon?: number,
+  q: SqlFn = sql
 ): Promise<ExitMultiple[]> {
   if (timeHorizon !== undefined) {
-    const { rows } = await sql`
+    const { rows } = await q`
       SELECT * FROM exit_multiples
       WHERE company_id = ${companyId} AND time_horizon_years = ${timeHorizon}
     `;
@@ -20,8 +21,8 @@ export async function findExitMultiplesByCompanyId(
   return rows.map(parseExitMultipleRow);
 }
 
-export async function upsertExitMultiple(data: ExitMultiple): Promise<ExitMultiple> {
-  const { rows } = await sql`
+export async function upsertExitMultiple(data: ExitMultiple, q: SqlFn = sql): Promise<ExitMultiple> {
+  const { rows } = await q`
     INSERT INTO exit_multiples (company_id, time_horizon_years, multiple)
     VALUES (${data.company_id}, ${data.time_horizon_years}, ${data.multiple})
     ON CONFLICT (company_id, time_horizon_years)
@@ -33,5 +34,16 @@ export async function upsertExitMultiple(data: ExitMultiple): Promise<ExitMultip
 
 export async function deleteExitMultiplesByCompanyId(companyId: number): Promise<void> {
   await sql`DELETE FROM exit_multiples WHERE company_id = ${companyId}`;
+}
+
+export async function deleteExitMultiple(
+  companyId: number,
+  timeHorizon: number,
+  q: SqlFn = sql
+): Promise<void> {
+  await q`
+    DELETE FROM exit_multiples
+    WHERE company_id = ${companyId} AND time_horizon_years = ${timeHorizon}
+  `;
 }
 

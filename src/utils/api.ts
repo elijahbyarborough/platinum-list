@@ -2,6 +2,7 @@ import { CompanyWithEstimates, CompanyFormData } from '@/types/company';
 import { ApiResponse, RefreshPricesResponse } from '@/types/api';
 import { SubmissionLogEntry } from '@/types/submissionLog';
 import { EditComparison, Change } from '@/types/editHistory';
+import { authHeaders, handleUnauthorized } from '@/utils/authToken';
 
 // In production (Vercel), API is same-origin. In development, proxy handles it.
 const API_BASE_URL = '/api';
@@ -18,9 +19,15 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      ...authHeaders(),
       ...options?.headers,
     },
   });
+
+  if (response.status === 401) {
+    handleUnauthorized();
+    throw new Error('Session expired. Please enter your PIN again.');
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Unknown error' }));

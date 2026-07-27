@@ -35,6 +35,10 @@ export default function SubmissionLog() {
       queryClient.invalidateQueries({ queryKey: ['submissionLogs'] });
       setDeleteConfirm(null);
     },
+    onError: (err: Error) => {
+      setDeleteConfirm(null);
+      alert(`Failed to delete submission: ${err.message || 'Unknown error'}`);
+    },
   });
 
   const handleDelete = (id: number) => {

@@ -1,35 +1,40 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, ReactNode } from 'react';
+import { AUTH_TOKEN_KEY } from '@/utils/authToken';
 
 interface AuthContextType {
   isAuthenticated: boolean;
-  authenticate: (pin: string) => boolean;
+  authenticate: (pin: string) => Promise<boolean>;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const CORRECT_PIN = '1225';
-const AUTH_STORAGE_KEY = 'platinum_list_auth';
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    // Check if authentication is cached
-    const cached = localStorage.getItem(AUTH_STORAGE_KEY);
-    return cached === 'authenticated';
-  });
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(
+    () => localStorage.getItem(AUTH_TOKEN_KEY) !== null
+  );
 
-  const authenticate = (pin: string): boolean => {
-    if (pin === CORRECT_PIN) {
+  const authenticate = async (pin: string): Promise<boolean> => {
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin }),
+      });
+      if (!response.ok) return false;
+      const { token } = await response.json();
+      if (typeof token !== 'string') return false;
+      localStorage.setItem(AUTH_TOKEN_KEY, token);
       setIsAuthenticated(true);
-      localStorage.setItem(AUTH_STORAGE_KEY, 'authenticated');
       return true;
+    } catch {
+      return false;
     }
-    return false;
   };
 
   const logout = () => {
     setIsAuthenticated(false);
-    localStorage.removeItem(AUTH_STORAGE_KEY);
+    localStorage.removeItem(AUTH_TOKEN_KEY);
   };
 
   return (

@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { getCurrentFiscalYear } from '@/utils/fiscalYear';
+import { getCurrentFiscalYear, parseDateOnly } from '@/utils/fiscalYear';
 
 interface FiscalYearPickerProps {
   value: string;
@@ -45,16 +45,13 @@ export function FiscalYearPicker({ value, onChange, required }: FiscalYearPicker
     setUserHasEdited(true);
     
     const fyNum = parseInt(newFY, 10);
-    if (!isNaN(fyNum) && value) {
-      // Parse existing date to get month and day
-      const existingDate = new Date(value);
-      const month = existingDate.getMonth(); // 0-indexed
-      const day = existingDate.getDate();
-      
-      // Create new date with the entered fiscal year
-      const newDate = new Date(fyNum, month, day);
-      const dateStr = newDate.toISOString().split('T')[0];
-      onChange(dateStr);
+    if (!isNaN(fyNum) && fyNum >= 1900 && fyNum <= 2200 && value) {
+      // Keep the month/day, swap in the entered year. Format from local
+      // components — toISOString() would shift the date across midnight UTC.
+      const existingDate = parseDateOnly(value);
+      const month = String(existingDate.getMonth() + 1).padStart(2, '0');
+      const day = String(existingDate.getDate()).padStart(2, '0');
+      onChange(`${fyNum}-${month}-${day}`);
     }
   };
 

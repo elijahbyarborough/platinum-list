@@ -428,8 +428,10 @@ export default function EditHistory() {
           </div>
         ) : (
           <div className="space-y-2">
-            {changes.map((change, index) => {
-              const id = `${change.type}-${index}`;
+            {changes.map((change) => {
+              // Stable key: index-based ids move the expanded state to a
+              // different row when a refetch reorders the list
+              const id = `${change.type}-${change.ticker}-${change.changed_at}`;
               return change.type === 'edit' ? (
                 <EditChangeRow 
                   key={id} 

@@ -1,8 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { findCompanyByTicker, updateCompanyPrice } from '../../../lib/models/company.js';
 import { getQuote } from '../../../lib/services/stockPriceService.js';
+import { requireAuth } from '../../../lib/auth.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (!requireAuth(req, res)) return;
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }

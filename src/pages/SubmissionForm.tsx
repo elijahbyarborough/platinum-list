@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,7 @@ import { IRRPreview } from '@/components/submission/IRRPreview';
 import { api } from '@/utils/api';
 import { CompanyFormData, MetricType, AnalystInitials, EstimateFormData } from '@/types/company';
 import { formatPrice, formatDateTime } from '@/utils/formatting';
+import { authHeaders } from '@/utils/authToken';
 
 export default function SubmissionForm() {
   const navigate = useNavigate();
@@ -21,6 +22,8 @@ export default function SubmissionForm() {
   const [stockPrice, setStockPrice] = useState<number | null>(null);
   const [priceLastUpdated, setPriceLastUpdated] = useState<string | null>(null);
   const [refreshingPrice, setRefreshingPrice] = useState(false);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
+  const quoteAbortRef = useRef<AbortController | null>(null);
   const [submissionSuccess, setSubmissionSuccess] = useState<string | null>(null);
   const [showOverrideDate, setShowOverrideDate] = useState(false);
 
@@ -36,14 +39,18 @@ export default function SubmissionForm() {
   });
 
   // Load existing company data if editing
-  const { data: existingCompany } = useQuery({
+  const {
+    data: existingCompany,
+    isLoading: loadingCompany,
+    error: companyError,
+  } = useQuery({
     queryKey: ['company', ticker],
     queryFn: () => api.getCompany(ticker!),
     enabled: !!ticker,
   });
 
   // Load original submission data to get the locked price
-  const { data: submissionData } = useQuery({
+  const { data: submissionData, isLoading: loadingSubmission } = useQuery({
     queryKey: ['submission', ticker],
     queryFn: () => api.getSubmissionForEdit(ticker!),
     enabled: !!ticker,
@@ -80,6 +87,7 @@ export default function SubmissionForm() {
         analyst_initials: existingCompany.analyst_initials,
         exit_multiple_5yr: existingCompany.exit_multiple_5yr || null,
         estimates: existingCompany.estimates || [],
+        override_updated_at: null,
       });
     }
   }, [existingCompany]);
@@ -108,15 +116,28 @@ export default function SubmissionForm() {
     const tickerSymbol = tickerToRefresh || formData.ticker;
     if (!tickerSymbol) return;
 
+    // Abort any in-flight fetch so a slow response for a previously selected
+    // ticker can't overwrite this one's price/fiscal year
+    quoteAbortRef.current?.abort();
+    const controller = new AbortController();
+    quoteAbortRef.current = controller;
+
     setRefreshingPrice(true);
+    setQuoteError(null);
     try {
       // Use the quote endpoint which doesn't require the company to exist
-      const response = await fetch(`/api/companies/${tickerSymbol}/quote`);
+      const response = await fetch(`/api/companies/${tickerSymbol}/quote`, {
+        headers: authHeaders(),
+        signal: controller.signal,
+      });
       if (response.ok) {
         const data = await response.json();
+        if (controller.signal.aborted) return;
         if (data.price !== null) {
           setStockPrice(data.price);
           setPriceLastUpdated(new Date().toISOString());
+        } else {
+          setQuoteError(`No price available for ${tickerSymbol}. Try Refresh, or submit without a price.`);
         }
         // Auto-populate fiscal year end if available
         if (data.fiscalYearEnd) {
@@ -125,11 +146,18 @@ export default function SubmissionForm() {
             fiscal_year_end_date: data.fiscalYearEnd,
           }));
         }
+      } else {
+        setQuoteError(`Could not fetch a price for ${tickerSymbol}. Try Refresh.`);
       }
     } catch (error) {
-      console.error('Error fetching stock price:', error);
+      if ((error as Error)?.name !== 'AbortError') {
+        console.error('Error fetching stock price:', error);
+        setQuoteError(`Could not fetch a price for ${tickerSymbol}. Try Refresh.`);
+      }
     } finally {
-      setRefreshingPrice(false);
+      if (quoteAbortRef.current === controller) {
+        setRefreshingPrice(false);
+      }
     }
   };
 
@@ -164,6 +192,14 @@ export default function SubmissionForm() {
       return;
     }
 
+    // New submissions lock in the price permanently — warn before locking in nothing
+    if (!ticker && stockPrice === null) {
+      const proceed = window.confirm(
+        'No stock price was fetched, so this submission will be saved without one and the IRR cannot be calculated. Submit anyway?'
+      );
+      if (!proceed) return;
+    }
+
     // Prepare submission data
     // For new submissions, include the stock price
     // For edits, don't send price - it stays locked to original submission
@@ -181,6 +217,32 @@ export default function SubmissionForm() {
   const handleEstimatesChange = (estimates: EstimateFormData[]) => {
     setFormData(prev => ({ ...prev, estimates }));
   };
+
+  // When editing, don't render the form until the existing data has loaded —
+  // otherwise a slow/failed load shows an empty form that could be submitted
+  // as an "edit" wiping the real estimates
+  if (ticker && (loadingCompany || loadingSubmission)) {
+    return (
+      <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center">
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          Loading {ticker}…
+        </div>
+      </div>
+    );
+  }
+
+  if (ticker && companyError) {
+    return (
+      <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4">
+        <div className="max-w-md text-center space-y-4">
+          <p className="text-destructive font-medium">Could not load {ticker} for editing.</p>
+          <p className="text-sm text-muted-foreground">{(companyError as Error).message}</p>
+          <Button variant="outline" onClick={() => navigate('/dashboard')}>Back to Dashboard</Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-grid-pattern">
@@ -283,6 +345,9 @@ export default function SubmissionForm() {
                     </div>
                   )}
                 </div>
+                {quoteError && !ticker && (
+                  <p className="text-xs text-destructive">{quoteError}</p>
+                )}
                 {priceLastUpdated && !ticker && (
                   <p className="text-xs text-muted-foreground">
                     Last updated: {formatDateTime(priceLastUpdated)}

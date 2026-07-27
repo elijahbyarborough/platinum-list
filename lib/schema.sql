@@ -57,23 +57,31 @@ CREATE TABLE IF NOT EXISTS change_logs (
   ticker VARCHAR(10) NOT NULL,
   company_name TEXT NOT NULL,
   change_type VARCHAR(20) NOT NULL CHECK(change_type IN ('edit', 'deletion')),
-  analyst_initials VARCHAR(5) NOT NULL,
+  analyst_initials VARCHAR(5) NOT NULL CHECK(analyst_initials IN ('EY', 'TR', 'JM', 'BB', 'NM')),
   changed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   before_snapshot JSONB,           -- Used for edits (before state)
   after_snapshot JSONB,            -- Used for edits (after state)
   snapshot_data JSONB              -- Used for deletions (deleted state)
 );
 
+-- Dashboard Snapshots table (daily PDF snapshots stored in Vercel Blob)
+CREATE TABLE IF NOT EXISTS dashboard_snapshots (
+  id SERIAL PRIMARY KEY,
+  snapshot_date DATE NOT NULL UNIQUE,
+  pdf_url TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes for performance
-CREATE INDEX IF NOT EXISTS idx_companies_ticker ON companies(ticker);
+-- (ticker and (company_id, fiscal_year, metric_type) already have indexes via their UNIQUE constraints)
 CREATE INDEX IF NOT EXISTS idx_companies_updated_at ON companies(updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_estimates_company_id ON estimates(company_id);
 CREATE INDEX IF NOT EXISTS idx_estimates_fiscal_year ON estimates(fiscal_year);
 CREATE INDEX IF NOT EXISTS idx_estimates_metric_type ON estimates(metric_type);
 CREATE INDEX IF NOT EXISTS idx_exit_multiples_company_id ON exit_multiples(company_id);
 CREATE INDEX IF NOT EXISTS idx_submission_logs_company_id ON submission_logs(company_id);
 CREATE INDEX IF NOT EXISTS idx_submission_logs_submitted_at ON submission_logs(submitted_at DESC);
 CREATE INDEX IF NOT EXISTS idx_change_logs_changed_at ON change_logs(changed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_dashboard_snapshots_date ON dashboard_snapshots(snapshot_date DESC);
 
 -- Function to auto-update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -85,11 +93,11 @@ END;
 $$ language 'plpgsql';
 
 -- Triggers for auto-updating timestamps
+-- NOTE: companies deliberately has NO updated_at trigger. companies.updated_at
+-- means "last analyst submission" (drives dashboard sort + PDF Updated column)
+-- and is set explicitly by the submission endpoint. A trigger here would let
+-- the twice-daily price cron bump it. See scripts/drop-companies-updated-at-trigger.mjs.
 DROP TRIGGER IF EXISTS update_companies_updated_at ON companies;
-CREATE TRIGGER update_companies_updated_at
-    BEFORE UPDATE ON companies
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS update_estimates_updated_at ON estimates;
 CREATE TRIGGER update_estimates_updated_at

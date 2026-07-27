@@ -1,8 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { findCompanyByTicker } from '../../../lib/models/company.js';
 import { findLatestSubmissionLogByCompanyId } from '../../../lib/models/submissionLog.js';
+import { requireAuth } from '../../../lib/auth.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (!requireAuth(req, res)) return;
   const { ticker } = req.query;
 
   if (req.method !== 'GET') {
@@ -10,7 +12,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const company = await findCompanyByTicker(ticker as string);
+    const company = await findCompanyByTicker((ticker as string).toUpperCase());
     if (!company) {
       return res.status(404).json({ error: 'Company not found' });
     }

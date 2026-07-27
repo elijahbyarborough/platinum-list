@@ -232,9 +232,7 @@ export function EstimatesTable({
           </thead>
           <tbody>
             {/* Metrics Row */}
-            <tr 
-              onPaste={(e) => handlePaste(e, 'metrics')}
-              onPasteCapture={(e) => handlePaste(e, 'metrics')}
+            <tr
               className={cn(
                 "transition-all duration-300",
                 isPasteActive === 'metrics' && "bg-primary/10"
@@ -254,16 +252,7 @@ export function EstimatesTable({
                       step="0.01"
                       value={estimate.metric_value === null ? '' : estimate.metric_value}
                       onChange={(e) => handleMetricChange(year, e.target.value)}
-                      onPaste={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handlePaste(e, 'metrics', year);
-                      }}
-                      onPasteCapture={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handlePaste(e, 'metrics', year);
-                      }}
+                      onPaste={(e) => handlePaste(e, 'metrics', year)}
                       className="h-9 text-center text-sm px-2 bg-background/50"
                       placeholder="—"
                     />
@@ -274,8 +263,6 @@ export function EstimatesTable({
 
             {/* Dividends Row */}
             <tr
-              onPaste={(e) => handlePaste(e, 'dividends')}
-              onPasteCapture={(e) => handlePaste(e, 'dividends')}
               className={cn(
                 "transition-all duration-300",
                 isPasteActive === 'dividends' && "bg-primary/10"
@@ -298,16 +285,7 @@ export function EstimatesTable({
                       step="0.01"
                       value={estimate.dividend_value === null ? '' : estimate.dividend_value}
                       onChange={(e) => handleDividendChange(year, e.target.value)}
-                      onPaste={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handlePaste(e, 'dividends', year);
-                      }}
-                      onPasteCapture={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handlePaste(e, 'dividends', year);
-                      }}
+                      onPaste={(e) => handlePaste(e, 'dividends', year)}
                       className="h-9 text-center text-sm px-2 bg-background/50"
                       placeholder="—"
                     />
@@ -318,8 +296,6 @@ export function EstimatesTable({
 
             {/* M&A Value Row */}
             <tr
-              onPaste={(e) => handlePaste(e, 'ma_value')}
-              onPasteCapture={(e) => handlePaste(e, 'ma_value')}
               className={cn(
                 "transition-all duration-300",
                 isPasteActive === 'ma_value' && "bg-primary/10"
@@ -342,16 +318,7 @@ export function EstimatesTable({
                       step="0.01"
                       value={estimate.ma_value === null ? '' : estimate.ma_value}
                       onChange={(e) => handleMaValueChange(year, e.target.value)}
-                      onPaste={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handlePaste(e, 'ma_value', year);
-                      }}
-                      onPasteCapture={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handlePaste(e, 'ma_value', year);
-                      }}
+                      onPaste={(e) => handlePaste(e, 'ma_value', year)}
                       className="h-9 text-center text-sm px-2 bg-background/50"
                       placeholder="—"
                     />
