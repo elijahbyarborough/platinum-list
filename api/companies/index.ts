@@ -8,7 +8,7 @@ import { calculate5YearIRR, hasSufficientDataForIRR } from '../../lib/utils/irrC
 import { requireAuth } from '../../lib/auth.js';
 
 const METRIC_TYPES = ['GAAP EPS', 'Norm. EPS', 'Mgmt. EPS', 'FCFPS', 'DEPS', 'NAVPS', 'BVPS', 'DPS', 'Other'];
-const ANALYST_INITIALS = ['EY', 'TR', 'JM', 'BB', 'NM'];
+const ANALYST_INITIALS = ['EY', 'TR', 'JM', 'BB', 'NM', 'RM']; // JM and BB are legacy: valid in the DB, hidden from the dropdown
 const SCENARIOS = ['base', 'bull', 'bear'];
 
 function isNumberOrNull(value: unknown): boolean {

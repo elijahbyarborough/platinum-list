@@ -480,9 +480,14 @@ export default function SubmissionForm() {
                 >
                   <option value="EY">EY</option>
                   <option value="TR">TR</option>
-                  <option value="JM">JM</option>
-                  <option value="BB">BB</option>
                   <option value="NM">NM</option>
+                  <option value="RM">RM</option>
+                  {/* JM and BB are former analysts: hidden from new submissions but
+                      kept selectable when editing a record that already has them,
+                      so the browser doesn't silently reassign it */}
+                  {['JM', 'BB'].includes(formData.analyst_initials) && (
+                    <option value={formData.analyst_initials}>{formData.analyst_initials}</option>
+                  )}
                 </Select>
               </div>
             </div>

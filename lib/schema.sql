@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS companies (
   current_stock_price DECIMAL(12,4),
   price_last_updated TIMESTAMPTZ,
   scenario VARCHAR(10) NOT NULL DEFAULT 'base' CHECK(scenario IN ('base', 'bull', 'bear')),
-  analyst_initials VARCHAR(5) NOT NULL CHECK(analyst_initials IN ('EY', 'TR', 'JM', 'BB', 'NM')),
+  analyst_initials VARCHAR(5) NOT NULL CHECK(analyst_initials IN ('EY', 'TR', 'JM', 'BB', 'NM', 'RM')),
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS exit_multiples (
 CREATE TABLE IF NOT EXISTS submission_logs (
   id SERIAL PRIMARY KEY,
   company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-  analyst_initials VARCHAR(5) NOT NULL CHECK(analyst_initials IN ('EY', 'TR', 'JM', 'BB', 'NM')),
+  analyst_initials VARCHAR(5) NOT NULL CHECK(analyst_initials IN ('EY', 'TR', 'JM', 'BB', 'NM', 'RM')),
   submitted_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   snapshot_data JSONB NOT NULL
 );
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS change_logs (
   ticker VARCHAR(10) NOT NULL,
   company_name TEXT NOT NULL,
   change_type VARCHAR(20) NOT NULL CHECK(change_type IN ('edit', 'deletion')),
-  analyst_initials VARCHAR(5) NOT NULL CHECK(analyst_initials IN ('EY', 'TR', 'JM', 'BB', 'NM')),
+  analyst_initials VARCHAR(5) NOT NULL CHECK(analyst_initials IN ('EY', 'TR', 'JM', 'BB', 'NM', 'RM')),
   changed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
   before_snapshot JSONB,           -- Used for edits (before state)
   after_snapshot JSONB,            -- Used for edits (after state)
